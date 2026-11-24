@@ -120,7 +120,15 @@ def categorize_all(conn: sqlite3.Connection, use_llm: bool = False, model: str |
 
 def _ollama_chat(model: str, prompt: str) -> str | None:
     url = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
-    body = json.dumps({"model": model, "stream": False, "messages": [{"role": "user", "content": prompt}]})
+    body = json.dumps(
+        {
+            "model": model,
+            "stream": False,
+            "format": "json",
+            "options": {"temperature": 0, "num_predict": 256},
+            "messages": [{"role": "user", "content": prompt}],
+        }
+    )
     req = urllib.request.Request(
         f"{url.rstrip('/')}/api/chat", data=body.encode(), headers={"Content-Type": "application/json"}
     )
@@ -136,7 +144,14 @@ def _openai_chat(model: str, prompt: str) -> str | None:
     base = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1")
     if not key:
         return None
-    body = json.dumps({"model": model, "messages": [{"role": "user", "content": prompt}], "temperature": 0})
+    body = json.dumps(
+        {
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0,
+            "response_format": {"type": "json_object"},
+        }
+    )
     req = urllib.request.Request(
         f"{base.rstrip('/')}/chat/completions",
         data=body.encode(),
@@ -153,9 +168,11 @@ def _llm_categorize(merchants: list[str], model: str | None) -> dict[str, str]:
     model = model or os.environ.get("CENTS_LLM_MODEL", "llama3.2")
     categories = ", ".join(CATEGORIES)
     prompt = (
-        f"You are categorizing financial transactions. Assign each merchant to exactly "
-        f"one of these categories: {categories}.\n"
-        f"Respond with ONLY a JSON object mapping merchant -> category.\n\nMerchants:\n"
+        f"Classify each merchant into exactly one category from this list (use only these "
+        f"exact names): {categories}.\n"
+        f"Return a single JSON object with exactly one entry per merchant — do not repeat "
+        f"or add extra keys.\n"
+        f"Merchants:\n"
         + "\n".join(f"- {m}" for m in merchants)
     )
 
@@ -170,4 +187,14 @@ def _llm_categorize(merchants: list[str], model: str | None) -> dict[str, str]:
         data = json.loads(match.group(0))
     except json.JSONDecodeError:
         return {}
-    return {k: v for k, v in data.items() if isinstance(v, str)}
+    # Keep only keys that are real input merchants (drop hallucinations), and
+    # canonicalize the merchant name back to the exact input casing.
+    known = {m.lower(): m for m in merchants}
+    result: dict[str, str] = {}
+    for k, v in data.items():
+        if not isinstance(v, str) or v not in CATEGORIES:
+            continue
+        canon = known.get(str(k).lower())
+        if canon:
+            result[canon] = v
+    return result

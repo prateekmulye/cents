@@ -80,3 +80,17 @@ def test_end_to_end():
     data = build_report_data(conn, date(2026, 11, 16), date(2026, 11, 22))
     assert data["current"]["expense"] > 0
     conn.close()
+
+
+def test_llm_filtering_drops_hallucinated_keys(monkeypatch):
+    import cents.categorize as cat
+
+    def fake_chat(model, prompt):
+        return '{"Kith": "Shopping", "Other": "Transport", "Glossier": "Subscriptions"}'
+
+    monkeypatch.setattr(cat, "_ollama_chat", fake_chat)
+    monkeypatch.setattr(cat, "_openai_chat", lambda m, p: None)
+
+    out = cat._llm_categorize(["Kith", "Glossier"], model="test")
+    assert out == {"Kith": "Shopping", "Glossier": "Subscriptions"}
+    assert "Other" not in out
