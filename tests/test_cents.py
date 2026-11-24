@@ -94,3 +94,17 @@ def test_llm_filtering_drops_hallucinated_keys(monkeypatch):
     out = cat._llm_categorize(["Kith", "Glossier"], model="test")
     assert out == {"Kith": "Shopping", "Glossier": "Subscriptions"}
     assert "Other" not in out
+
+
+def test_llm_recovers_inverted_mapping(monkeypatch):
+    import cents.categorize as cat
+
+    # Model returns category -> merchant (backwards). We should recover it.
+    def fake_chat(model, prompt):
+        return '{"Shopping": "Kith", "Personal Care": "Glossier"}'
+
+    monkeypatch.setattr(cat, "_ollama_chat", fake_chat)
+    monkeypatch.setattr(cat, "_openai_chat", lambda m, p: None)
+
+    out = cat._llm_categorize(["Kith", "Glossier"], model="test")
+    assert out == {"Kith": "Shopping", "Glossier": "Personal Care"}

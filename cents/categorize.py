@@ -168,11 +168,10 @@ def _llm_categorize(merchants: list[str], model: str | None) -> dict[str, str]:
     model = model or os.environ.get("CENTS_LLM_MODEL", "llama3.2")
     categories = ", ".join(CATEGORIES)
     prompt = (
-        f"Classify each merchant into exactly one category from this list (use only these "
-        f"exact names): {categories}.\n"
-        f"Return a single JSON object with exactly one entry per merchant — do not repeat "
-        f"or add extra keys.\n"
-        f"Merchants:\n"
+        f"Classify each merchant into exactly one category. Categories (use only these): {categories}.\n"
+        f'Return a JSON object where each KEY is a merchant name and each VALUE is its category, '
+        f'for example: {{"Netflix": "Subscriptions", "Uber": "Transport"}}.\n'
+        f"Merchants to classify:\n"
         + "\n".join(f"- {m}" for m in merchants)
     )
 
@@ -192,9 +191,17 @@ def _llm_categorize(merchants: list[str], model: str | None) -> dict[str, str]:
     known = {m.lower(): m for m in merchants}
     result: dict[str, str] = {}
     for k, v in data.items():
-        if not isinstance(v, str) or v not in CATEGORIES:
+        if not isinstance(k, str) or not isinstance(v, str):
             continue
-        canon = known.get(str(k).lower())
-        if canon:
-            result[canon] = v
+        if v in CATEGORIES:
+            canon = known.get(k.lower())
+            if canon:
+                result[canon] = v
+    # Recover if the model inverted the mapping (category -> merchant).
+    if not result:
+        for k, v in data.items():
+            if isinstance(k, str) and k in CATEGORIES and isinstance(v, str):
+                canon = known.get(v.lower())
+                if canon:
+                    result[canon] = k
     return result
